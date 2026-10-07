@@ -7,8 +7,9 @@
   "bar": {
     "position": "top",
     "transparent": false,
-    "height": 48,
-    "font-size": 16,
+    "height": 54,
+    "font-size": 22,
+    "icon-size": 28,
     "centerAnchor": "omarchy.clock",
     "layout": {
       "left": [
