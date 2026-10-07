@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# Omarchy bar module: Dell Technologies (NYSE: DELL) stock price.
+# Updates every ~15 min (bar timer) and only while the NYSE regular
+# session is open (09:30-16:00 America/New_York, Mon-Fri). When the market
+# is closed the widget keeps showing the last close, marked CLOSED, and
+# makes NO network calls (except a one-time bootstrap fetch if it has
+# never fetched at all).
+# Hover tooltip includes a 3-month daily-close LINE chart drawn with
+# Unicode braille dots (2 samples per glyph, points connected). One Yahoo
+# call (range=3mo, interval=1d) supplies the live meta AND the daily series.
+# Prints Waybar-style JSON on ONE line: {"text":...,"tooltip":...,"class":...}
+set -u
+
+SYMBOL="DELL"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-bar"
+CACHE="$CACHE_DIR/stock-$SYMBOL.json"
+CACHE_TTL=25            # s — minimum spacing between live fetches
+NETWORK_FAIL_MAX=$((10 * 60))  # during trading, hide if last good data is older
+UA="Mozilla/5.0"       # short UA — long Chrome UA strings get 429'd by Yahoo
+URL_HOSTS=(query1 query2)
+
+now=$(date +%s)
+
+cache_ts() { jq -r '.ts // 0' "$CACHE" 2>/dev/null || echo 0; }
+cache_age=$(( now - $(cache_ts) ))
+
+# NYSE regular session, local time computation (no holiday calendar —
+# on holidays it harmlessly re-fetches an unchanged close).
+market_open() {
+  local dow hm
+  dow=$(TZ=America/New_York date +%u)
+  hm=$((10#$(TZ=America/New_York date +%H%M)))
+  (( dow >= 1 && dow <= 5 )) || return 1
+  (( hm >= 930 && hm < 1600 ))
+}
+
+open=false; market_open && open=true
+
+# Decide whether to hit the network.
+want_fetch=false
+[[ -f "$CACHE" ]] || want_fetch=true                    # bootstrap: never fetched
+# cache written by an older schema (no hi3/lo3 extremes)? refetch once.
+if [[ -f "$CACHE" ]] && ! jq -e 'has("hi3")' "$CACHE" >/dev/null 2>&1; then want_fetch=true; fi
+if $open && (( cache_age >= CACHE_TTL )); then want_fetch=true; fi
+
+if $want_fetch; then
+  resp=""
+  for host in "${URL_HOSTS[@]}"; do
+    resp=$(curl -sf --max-time 6 -H "User-Agent: $UA" \
+      "https://$host.finance.yahoo.com/v8/finance/chart/$SYMBOL?interval=1d&range=3mo" 2>/dev/null) && break
+    sleep 1
+  done
+  price=$(jq -r '.chart.result[0].meta.regularMarketPrice // empty' <<<"$resp" 2>/dev/null || true)
+  if [[ -n "$price" ]]; then
+    pct=$(jq -r '.chart.result[0].meta.regularMarketChangePercent // 0' <<<"$resp")
+    mtime=$(jq -r '.chart.result[0].meta.regularMarketTime // 0' <<<"$resp")
+    mkdir -p "$CACHE_DIR"
+    jq -n --argjson ts "$now" --argjson price "$price" --argjson pct "$pct" \
+       --argjson mtime "$mtime" --argjson resp "$resp" '
+       ($resp.chart.result[0]) as $r |
+       ($r.indicators.quote[0]) as $r0 |
+       [ $r0.high | to_entries[] | select(.value != null) ] as $hp |
+       [ $r0.low  | to_entries[] | select(.value != null) ] as $lp |
+       ($hp | max_by(.value)) as $hmx | ($lp | min_by(.value)) as $lmn |
+       {ts:$ts, price:$price, pct:$pct, mtime:$mtime,
+        hi3:  $hmx.value,
+        lo3:  $lmn.value,
+        hi3_day: ($r.timestamp[ $hmx.key ] // 0),
+        lo3_day: ($r.timestamp[ $lmn.key ] // 0),
+        closes: ([$r0.close[] | select(. != null)]),
+        day_first: ($r.timestamp | first // 0),
+        day_last:  ($r.timestamp | last  // 0)}' > "$CACHE"
+    cache_age=0
+  fi
+fi
+
+# Nothing usable → hide the slot cleanly.
+[[ -f "$CACHE" ]] || exit 0
+# While trading, stale data means the network is down — hide rather than
+# mislead. While closed, keeping the last close on display is intended.
+if $open && (( cache_age > NETWORK_FAIL_MAX )); then exit 0; fi
+
+price=$(jq -r '.price' "$CACHE")
+pct=$(jq -r '.pct' "$CACHE")
+mtime=$(jq -r '.mtime' "$CACHE")
+ncloses=$(jq -r '(.closes // []) | length' "$CACHE")
+
+arrow="▬"
+[[ $(jq -nr --argjson p "$pct" '$p > 0') == "true" ]] && arrow="▲"
+[[ $(jq -nr --argjson p "$pct" '$p < 0') == "true" ]] && arrow="▼"
+ptxt=$(LC_ALL=C printf "%+.2f%%" "$pct")
+price_fmt=$(LC_ALL=en_US.UTF-8 printf "%'.2f" "$price" 2>/dev/null) || price_fmt=""
+[[ -z "$price_fmt" ]] && price_fmt=$(LC_ALL=C printf "%.2f" "$price")
+when=$(date -d "@$mtime" "+%b %d, %H:%M" 2>/dev/null || echo "")
+
+if $open; then
+  text="DELL \$$price_fmt $arrow$ptxt"
+  status="Market: open"
+  [[ $cache_age -gt CACHE_TTL ]] && status="Market: open (cached — network issue)"
+else
+  text="DELL \$$price_fmt · CLOSED"
+  status="Market: closed"
+fi
+
+# ---- 3-month sparkline for the hover tooltip ----
+sparkline=""
+spark_line2=""
+if (( ncloses > 5 )); then
+  # Braille LINE chart: downsample to 60 daily points, map each to a dot-row
+  # (0=top..3=bottom), connect adjacent points with a vertical run, pack 2
+  # columns per braille glyph. awk emits one Unicode scalar per glyph; jq
+  # implode renders them as text. Reads like a real trend line, not bars.
+  sparkline=$(
+    jq -r '
+      .closes
+      | (if length > 60 then
+           . as $c | length as $n
+           | [ range(0; 60) | (. * ($n - 1) / 59 | round) as $i | $c[$i] ]
+         else . end)
+      | .[]' "$CACHE" \
+    | awk '
+        { v[NR] = $1 + 0; n = NR }
+        END {
+          if (!n) exit
+          min = v[1]; max = v[1]
+          for (i = 1; i <= n; i++) { if (v[i] < min) min = v[i]; if (v[i] > max) max = v[i] }
+          rng = max - min; if (rng == 0) rng = 1
+          prev = -1
+          for (i = 1; i <= n; i++) {
+            row = int((max - v[i]) / rng * 3 + 0.5)      # 0=top .. 3=bottom
+            if (prev < 0) prev = row
+            scol = (i - 1) % 2; ci = int((i - 1) / 2)
+            a = row; b = prev; if (a > b) { t = a; a = b; b = t }
+            for (r = a; r <= b; r++) {
+              if (scol == 0) bit = (r == 0 ? 1 : r == 1 ? 2 : r == 2 ? 4 : 64)
+              else          bit = (r == 0 ? 8 : r == 1 ? 16 : r == 2 ? 32 : 128)
+              M[ci] += bit
+            }
+            prev = row
+          }
+          nch = int((n + 1) / 2)
+          for (c = 0; c < nch; c++) printf "%d\n", 10240 + M[c]
+        }' \
+    | jq -Rnj '[ inputs | tonumber ] | implode'
+  )
+
+  # Second tooltip line: TRUE 3-month extremes (intraday high/low, not
+  # first/last closes) with the dates they hit, plus the swing size.
+  hi3=$(jq -r '.hi3 // empty' "$CACHE")
+  lo3=$(jq -r '.lo3 // empty' "$CACHE")
+  if [[ -z "$hi3" || -z "$lo3" ]]; then        # pre-extremes cache fallback
+    hi3=$(jq -r '.closes | max' "$CACHE")
+    lo3=$(jq -r '.closes | min' "$CACHE")
+    hi_day=""; lo_day=""
+  else
+    hi_day=$(date -d "@$(jq -r '.hi3_day // 0' "$CACHE")" "+%b %d" 2>/dev/null || echo "")
+    lo_day=$(date -d "@$(jq -r '.lo3_day // 0' "$CACHE")" "+%b %d" 2>/dev/null || echo "")
+  fi
+  spark_line2=$(LC_ALL=C awk -v h="$hi3" -v l="$lo3" -v hd="$hi_day" -v ld="$lo_day" '
+    BEGIN {
+      if (hd != "") hd = " (" hd ")"; if (ld != "") ld = " (" ld ")"
+      printf "High $%.2f%s · Low $%.2f%s", h, hd, l, ld
+      if (l > 0) printf "  ·  %.1f%% swing", (h - l) / l * 100
+    }')
+fi
+
+nl=$'\n'
+tooltip="Dell Technologies · NYSE: $SYMBOL${nl}$price_fmt USD $ptxt as of $when${nl}$status"
+if [[ -n "$sparkline" ]]; then
+  tooltip="${tooltip}${nl}${nl}3 months:${nl}$sparkline"
+  [[ -n "$spark_line2" ]] && tooltip="${tooltip}${nl}${spark_line2}"
+fi
+tooltip="${tooltip}${nl}${nl}Click → Yahoo Finance quote"
+
+# The bar parses ONLY the last line of stdout (Util.parseModuleJson),
+# so emit single-line JSON (jq -c); real newlines above escape to \n
+# and come back as a multi-line tooltip.
+jq -cn --arg text "$text" --arg tooltip "$tooltip" '{text:$text, tooltip:$tooltip, class:""}'
