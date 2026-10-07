@@ -2,8 +2,8 @@
 base-size = 22
 
 [bar]
-size-horizontal = 54
-icon-slot = 28
+size-horizontal = 36
+icon-slot = 24
 icon-canvas = 20
 icon-font = 18
 
