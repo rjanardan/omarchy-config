@@ -1,11 +1,19 @@
+# User-level override for the Omarchy shell only (bar, menus, panels).
+# Applications and terminal text are NOT affected.
+#
+# Parser math (shell/Commons/Style.qml): fontScale = base-size / 12;
+# bar icon font = 13 * fontScale, bar height = size-horizontal * fontScale
+# (when scale-with-font = true). Per-token [font] keys pin one size.
+#
+# With base-size = 18 -> fontScale = 1.5:
+#   bar height    : 16 * 1.5 = 24 px
+#   bar text      : pinned to 16 px (body token)
+#   bar icons     : 13 * 1.5 = 20 px (ALL icons: display, ethernet,
+#                   bluetooth, audio, power, reminders — same token)
 [font]
-base-size = 22
+base-size = 18
+body = 16
 
 [bar]
-size-horizontal = 36
-icon-slot = 24
-icon-canvas = 20
-icon-font = 18
-
-[spacing]
-scale = 1.0
+scale-with-font = true
+size-horizontal = 16
