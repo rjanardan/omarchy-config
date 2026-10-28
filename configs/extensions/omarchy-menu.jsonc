@@ -17,7 +17,8 @@
   //   checked     Shell condition; append ✓ when it succeeds.
   //
     "personal.micro": { "icon": "", "label": "Micro Editor", "action": "micro" },
-  // Examples:
+        "setup.default.editor.micro": { "icon": "", "label": "Micro", "when": "omarchy-cmd-present micro", "checked": "[[ \"$(omarchy-default-editor)\" == \"micro\" ]]", "action": "mkdir -p ~/.local/state/omarchy/defaults && printf 'micro\\n' > ~/.local/state/omarchy/defaults/editor" },
+      // Examples:
   // "personal": {"icon":"","label":"Personal"},
   // "personal.notes": {"icon":"󰎞","label":"Notes","action":"omarchy-launch-editor ~/notes"},
   // "personal.files": {"icon":"","label":"Files","action":"uwsm-app -- nautilus ~/Documents"},

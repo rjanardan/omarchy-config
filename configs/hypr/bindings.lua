@@ -31,7 +31,7 @@ hl.unbind("SUPER + SHIFT + H")  -- avoid duplicate if you re-run this
 o.bind("SUPER + SHIFT + H", "Hermes", "omarchy-launch-or-focus Hermes '/home/jana/.local/bin/hermes desktop --skip-build'")
 
 -- Map Super+Left/Right to switch workspaces (previously "focus left/right window")
-hl.unbind("SUPER + LEFT")
-hl.unbind("SUPER + RIGHT")
-o.bind("SUPER + LEFT", "Previous workspace", hl.dsp.focus({ workspace = "e-1" }))
-o.bind("SUPER + RIGHT", "Next workspace", hl.dsp.focus({ workspace = "e+1" }))
+-- hl.unbind("SUPER + LEFT")
+-- hl.unbind("SUPER + RIGHT")
+-- o.bind("SUPER + LEFT", "Previous workspace", hl.dsp.focus({ workspace = "e-1" }))
+-- o.bind("SUPER + RIGHT", "Next workspace", hl.dsp.focus({ workspace = "e+1" }))

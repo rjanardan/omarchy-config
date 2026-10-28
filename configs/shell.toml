@@ -11,9 +11,9 @@
 #   bar icons     : 13 * 1.5 = 20 px (ALL icons: display, ethernet,
 #                   bluetooth, audio, power, reminders — same token)
 [font]
-base-size = 18
+base-size = 12
 body = 16
 
 [bar]
 scale-with-font = true
-size-horizontal = 16
+size-horizontal = 22
